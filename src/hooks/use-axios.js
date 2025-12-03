@@ -1,0 +1,62 @@
+import axios from "../api/axios";
+import { useEffect } from "react";
+import useRefreshToken from "./use-refresh-token";
+import useAuth from "./use-auth";
+import { useNavigate } from "react-router-dom";
+
+export default function useAxios() {
+    const refresh = useRefreshToken();
+    const { auth, logout } = useAuth();
+    const navigate = useNavigate();
+
+    useEffect(() => {
+
+        const requestIntercept = axios.interceptors.request.use(config => {
+            const exceptedRoutes = [
+                '/auth/login',
+                '/auth/register',
+                '/auth/forgot-password',
+                '/auth/refresh-token',
+            ];
+
+            const isPublic = exceptedRoutes.some(route =>
+                config.url?.endsWith(route)
+            );
+
+            if (isPublic) {
+                delete config.headers['Authorization'];
+                return config;
+            }
+
+            if (!config.headers['Authorization']) {
+                config.headers['Authorization'] = `Bearer ${auth?.accessToken}`;
+            }
+            return config;
+        }, (error) => Promise.reject(error));
+
+        const responseIntercept = axios.interceptors.response.use(
+            response => response,
+            async (error) => {
+                const prevRequest = error?.config;
+                if (error?.response?.status === 403 && !prevRequest?.sent) {
+                    prevRequest.sent = true;
+                    const newAccessToken = await refresh();
+                    prevRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
+                    return axios(prevRequest);
+                }
+                if (error?.response.status === 401) {
+                    logout();
+                    navigate('/login');
+                }
+                return Promise.reject(error);
+            }
+        );
+
+        return () => {
+            axios.interceptors.request.eject(requestIntercept);
+            axios.interceptors.response.eject(responseIntercept);
+        }
+    }, []);
+
+    return axios;
+}
