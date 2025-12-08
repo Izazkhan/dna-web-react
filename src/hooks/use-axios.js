@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 
 export default function useAxios() {
     const refresh = useRefreshToken();
-    const { auth, logout } = useAuth();
+    const { auth, logout, setNewToken } = useAuth();
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -38,15 +38,23 @@ export default function useAxios() {
             response => response,
             async (error) => {
                 const prevRequest = error?.config;
-                if (error?.response?.status === 403 && !prevRequest?.sent) {
-                    prevRequest.sent = true;
-                    const newAccessToken = await refresh();
-                    prevRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
-                    return axios(prevRequest);
-                }
-                if (error?.response.status === 401) {
+                if (prevRequest.url?.includes('/refresh')) {
                     logout();
                     navigate('/login');
+                    return Promise.reject(error);
+                }
+                if (error?.response?.status === 401) {
+                    prevRequest.sent = true;
+                    const newAccessToken = await refresh();
+                    // Verify token exists before retrying
+                    if (!newAccessToken) {
+                        logout();
+                        navigate('/login');
+                        return Promise.reject(error);
+                    }
+                    setNewToken(newAccessToken);
+                    prevRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
+                    return axios(prevRequest);
                 }
                 return Promise.reject(error);
             }
