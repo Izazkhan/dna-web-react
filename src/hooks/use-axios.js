@@ -38,6 +38,9 @@ export default function useAxios() {
             response => response,
             async (error) => {
                 const prevRequest = error?.config;
+                if (prevRequest.url?.includes('/login')) {
+                    return Promise.reject(error);
+                }
                 if (prevRequest.url?.includes('/refresh')) {
                     logout();
                     navigate('/login');
