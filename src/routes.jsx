@@ -15,7 +15,7 @@ import CampaignDetail from "./pages/campaigns/campaign-detail";
 import { StripeApp } from "./pages/checkout/stripe-app";
 import PaymentSuccess from "./pages/checkout/payment-success";
 import EditCampaign from "./pages/campaigns/edit-campaign";
-import InfluencersList from "./pages/influencers/influencers-list"; // Added import
+import InfluencersList from "./pages/proposals/influencers-list"; // Added import
 import AgreementsList from "./pages/agreements/agreements-list"; // Added import
 import PaymentsList from "./pages/payments/payments-list"; // Added import
 import Login from "./pages/auth/login";
