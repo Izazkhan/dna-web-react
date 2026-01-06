@@ -882,6 +882,10 @@ main {
     height: 34px;
     border-radius: 50%;
   }
+  
+  .dropdown-item * {
+    pointer-events: none;
+  }
 
   .influencers-container {
     padding: 5px 0 0 0;

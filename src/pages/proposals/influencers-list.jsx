@@ -1,65 +1,185 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import CustomRadio from "../../components/custom-radio";
 import useAxios from "../../hooks/use-axios";
 
 const InfluencersList = () => {
   const axios = useAxios();
+  const PAGE_SIZE = 1;
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedInfluencer, setSelectedInfluencer] = useState(null);
-  const [showSponsored, setShowSponsored] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("engagement");
+
   const [influencers, setInfluencers] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [expandedCampaignId, setExpandedCampaignId] = useState(null);
+  const [proposalsMap, setProposalsMap] = useState({});
 
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [activeFilter, setActiveFilter] = useState("all");
 
-  const fetchInfluencers = useCallback(
-    async (isNewFilter = false) => {
+  const getSortParam = (sort) =>
+    sort === "followers" ? "followers_count" : "engagement";
+
+  const apiStatus = {
+    "worked-with": "completed",
+    review: "accepted",
+    declined: "rejected",
+    active: "active",
+  };
+  const getApiStatus = (filter) => {
+    if (filter === "worked-with") return "completed";
+    if (filter === "review") return "accepted";
+    return filter;
+  };
+
+  // Main List
+  const fetchData = useCallback(
+    async (isInitial = false, overrideSort = null) => {
       if (isLoading) return;
-
       setIsLoading(true);
+
       try {
-        const currentPage = isNewFilter ? 1 : page;
+        const currentPage = isInitial ? 1 : page;
+        const isAll = activeFilter === "all";
+        const statusForUrl = apiStatus[activeFilter];
+        const url = isAll
+          ? "/influencers"
+          : `/adcampaigns/with-${statusForUrl}-proposals`;
+
+        const currentSort = overrideSort || sortBy;
+        console.log('Here 1', searchQuery);
+        
         const response = await axios({
           method: "GET",
-          url: "/influencers",
+          url: url,
           params: {
             page: currentPage,
-            pagesize: 10,
-            status: activeFilter === "all" ? "" : activeFilter,
+            pagesize: PAGE_SIZE,
+            search: searchQuery,
+            sort: getSortParam(currentSort),
           },
         });
 
+        const resData = response.data?.data;
+        const items = isAll
+          ? resData?.igb_accounts || []
+          : resData?.campaigns || [];
         const pagination = response.data?.data?.pagination;
 
-        const igbAccounts = response.data?.data?.igb_accounts || [];
-
-        if (isNewFilter) {
-          setInfluencers(igbAccounts);
+        if (isInitial) {
+          isAll ? setInfluencers(items) : setCampaigns(items);
           setPage(2);
         } else {
-          setInfluencers((prev) => [...prev, ...igbAccounts]);
-          setPage((prev) => prev + 1);
+          isAll
+            ? setInfluencers((p) => [...p, ...items])
+            : setCampaigns((p) => [...p, ...items]);
+          setPage((p) => p + 1);
         }
 
         if (pagination) {
           setHasMore(pagination.page < pagination.totalPages);
+        } else {
+          setHasMore(items.length >= PAGE_SIZE);
         }
       } catch (error) {
-        console.error("Failed to fetch influencers:", error);
+        console.error("Main list fetch error:", error);
       } finally {
         setIsLoading(false);
       }
     },
-    [axios, page, activeFilter, isLoading]
+    [axios, page, activeFilter, isLoading, sortBy, searchQuery]
   );
 
+  // Nested Proposals
+  const fetchProposals = useCallback(
+    async (campaignId, isInitial = false, overrideSort = null) => {
+      setProposalsMap((prev) => ({
+        ...prev,
+        [campaignId]: { ...(prev[campaignId] || {}), isLoading: true },
+      }));
+
+      try {
+        const currentData = proposalsMap[campaignId];
+        const nextPage = isInitial ? 1 : currentData?.page || 1;
+        const statusForUrl = getApiStatus(activeFilter);
+
+        const currentSort = overrideSort || sortBy;
+
+        const response = await axios.get(
+          `/adcampaigns/${campaignId}/proposals/${statusForUrl}`,
+          {
+            params: {
+              page: nextPage,
+              pagesize: PAGE_SIZE,
+              sort: getSortParam(currentSort),
+            },
+          }
+        );
+
+        const newProposals = response.data?.data?.proposals || [];
+        const pagination = response.data?.data?.pagination;
+
+        setProposalsMap((prev) => ({
+          ...prev,
+          [campaignId]: {
+            list: isInitial
+              ? newProposals
+              : [...(prev[campaignId]?.list || []), ...newProposals],
+            page: (pagination?.page || nextPage) + 1,
+            hasMore: pagination
+              ? pagination.page < pagination.totalPages
+              : false,
+            isLoading: false,
+          },
+        }));
+      } catch (err) {
+        console.error("Proposals fetch error", err);
+        setProposalsMap((prev) => ({
+          ...prev,
+          [campaignId]: { ...(prev[campaignId] || {}), isLoading: false },
+        }));
+      }
+    },
+    [axios, activeFilter, sortBy, proposalsMap]
+  );
+
+  const handleSortChange = (newSort) => {
+    setSortBy(newSort);
+
+    if (activeFilter === "all") {
+      setInfluencers([]);
+      fetchData(true, newSort); // Pass newSort explicitly
+    } else if (expandedCampaignId) {
+      setProposalsMap((prev) => ({
+        ...prev,
+        [expandedCampaignId]: {
+          ...prev[expandedCampaignId],
+          list: [],
+          page: 1,
+          hasMore: true,
+          isLoading: true,
+        },
+      }));
+      fetchProposals(expandedCampaignId, true, newSort); // Pass newSort explicitly
+    }
+  };
+
   useEffect(() => {
-    fetchInfluencers(true);
-  }, [activeFilter]);
+    // Create a debouncer to wait for the user to stop typing
+    
+    const delayDebounceFn = setTimeout(() => {
+      setExpandedCampaignId(null);
+      setProposalsMap({});
+      fetchData(true);
+    }, 500);
+      console.log('Here 0', searchQuery);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [activeFilter, searchQuery]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -67,43 +187,44 @@ const InfluencersList = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // --- Helper Functions ---
-  const handleSelect = (inf) => setSelectedInfluencer(inf);
-
-  const goBack = (e) => {
-    e.preventDefault();
-    setSelectedInfluencer(null);
-  };
-
-  const handleFilterChange = (value) => {
-    setActiveFilter(value);
-    setHasMore(true); // Reset load more for new filter
+  const toggleCampaign = (campaignId) => {
+    if (expandedCampaignId === campaignId) {
+      setExpandedCampaignId(null);
+    } else {
+      setExpandedCampaignId(campaignId);
+      if (
+        !proposalsMap[campaignId] ||
+        proposalsMap[campaignId].list.length === 0
+      ) {
+        fetchProposals(campaignId, true);
+      }
+    }
   };
 
   const formatNumber = (num, digits = 1) => {
     const n = Number(num);
     if (!n || isNaN(n)) return "0";
-
     const lookup = [
       { value: 1, symbol: "" },
       { value: 1e3, symbol: "k" },
       { value: 1e6, symbol: "m" },
       { value: 1e9, symbol: "b" },
     ];
-    const rx = /\.0+$|(\.[0-9]*[1-9])0+$/;
     const item = lookup
       .slice()
       .reverse()
-      .find((item) => n >= item.value);
+      .find((i) => n >= i.value);
     return item
-      ? (n / item.value).toFixed(digits).replace(rx, "$1") + item.symbol
+      ? (n / item.value)
+          .toFixed(digits)
+          .replace(/\.0+$|(\.[0-9]*[1-9])0+$/, "$1") + item.symbol
       : "0";
   };
 
   return (
     <div className="container-fluid bg-white">
       <div className="row m-lg-4 justify-content-center proposal-influencers-list-p">
-        {/* --- LEFT SIDE: Search and List --- */}
+        {/* LEFT COLUMN */}
         <div
           className={`col-12 col-md-4 border-right p-0 ${
             selectedInfluencer && isMobile ? "d-none" : "d-block"
@@ -114,7 +235,7 @@ const InfluencersList = () => {
               Influencers
             </h4>
 
-            {/* Search & Filter UI */}
+            {/* Filter Section */}
             <div className="d-flex align-items-center mb-4">
               <div
                 className="input-group bg-light rounded-pill px-3 py-2 align-items-center flex-grow-1"
@@ -127,30 +248,31 @@ const InfluencersList = () => {
                   placeholder="Search here"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ fontSize: "14px" }}
                 />
               </div>
               <div className="btn-group">
                 <i
                   className="bi bi-sliders text-dark ms-3 cursor-pointer"
-                  type="button"
                   data-bs-toggle="dropdown"
                   style={{ fontSize: "20px" }}
                 ></i>
-                <ul className="dropdown-menu dropdown-menu-lg-end">
+                <ul className="dropdown-menu dropdown-menu-lg-end shadow border-0">
                   {["all", "review", "active", "declined", "worked-with"].map(
                     (f) => (
                       <li key={f}>
-                        <div className="dropdown-item">
+                        <button
+                          onClick={() => setActiveFilter(f)}
+                          className="dropdown-item py-2"
+                        >
                           <CustomRadio
                             name="status"
                             value={f}
                             selectedValue={activeFilter}
-                            onChange={handleFilterChange}
                           >
-                            {f.replace("-", " ").toUpperCase()}
+                            {f.replace("-", " ").charAt(0).toUpperCase() +
+                              f.replace("-", " ").slice(1)}
                           </CustomRadio>
-                        </div>
+                        </button>
                       </li>
                     )
                   )}
@@ -158,147 +280,211 @@ const InfluencersList = () => {
               </div>
             </div>
 
-            {/* Influencer List Items */}
+            {/* Main List */}
             <div className="influencer-list">
-              {influencers
-                .filter((inf) =>
-                  (inf?.name || "")
-                    .toLowerCase()
-                    .includes(searchQuery.toLowerCase())
-                )
-                .map((inf) => (
-                  <div
-                    key={inf.id}
-                    onClick={() => handleSelect(inf)}
-                    className={`d-flex align-items-center justify-content-between p-3 border-bottom cursor-pointer ${
-                      selectedInfluencer?.id === inf.id ? "bg-light" : ""
-                    }`}
-                  >
-                    <div className="d-flex align-items-center">
+              {activeFilter === "all"
+                ? influencers
+                    .filter((inf) =>
+                      inf.name
+                        ?.toLowerCase()
+                        .includes(searchQuery.toLowerCase())
+                    )
+                    .map((inf) => (
                       <div
-                        className="me-3 text-white d-flex align-items-center justify-content-center rounded-circle overflow-hidden"
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          backgroundColor: inf.color || "#ccc",
-                        }}
+                        key={inf.id}
+                        onClick={() => setSelectedInfluencer(inf)}
+                        className={`d-flex align-items-center justify-content-between p-1 border-bottom cursor-pointer ${
+                          selectedInfluencer?.id === inf.id ? "bg-light" : ""
+                        }`}
                       >
-                        {inf.profile_picture_url ? (
-                          <img
-                            src={inf.profile_picture_url}
-                            alt={inf.name}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                              objectPosition: "center",
-                            }}
-                          />
-                        ) : (
-                          inf.name?.charAt(0)
-                        )}
-                      </div>
-                      <div style={{ lineHeight: 1 }}>
-                        <div
-                          className="font-weight-bold mb-0 text-dark"
-                          style={{ fontSize: "15px" }}
-                        >
-                          {inf.name}
+                        <div className="d-flex align-items-center">
+                          <div
+                            className="me-3 rounded-circle overflow-hidden"
+                            style={{ width: "40px", height: "40px" }}
+                          >
+                            <img
+                              src={inf.profile_picture_url}
+                              alt=""
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover",
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <div
+                              className="font-weight-bold lh-1"
+                              style={{ fontSize: "14px" }}
+                            >
+                              {inf.name}
+                            </div>
+                            <small className="text-muted">
+                              @{inf.username}
+                            </small>
+                          </div>
                         </div>
-                        <small
-                          className="text-muted"
-                          style={{ fontSize: "12px" }}
-                        >
-                          @{inf.username}
-                        </small>
+                        <i className="bi bi-chevron-right text-muted"></i>
                       </div>
-                    </div>
-                    <i
-                      className="bi bi-chevron-right text-muted"
-                      style={{ fontSize: "12px" }}
-                    ></i>
-                  </div>
-                ))}
+                    ))
+                : campaigns.map((camp) => (
+                    <div key={camp.id} className="border-bottom">
+                      <div
+                        onClick={() => toggleCampaign(camp.id)}
+                        className="d-flex align-items-center justify-content-between px-1 py-2 cursor-pointer hover-bg-light"
+                      >
+                        <span style={{ fontSize: "14px", fontWeight: "500" }}>
+                          {camp.name}
+                        </span>
+                        <i
+                          className={`bi bi-chevron-${
+                            expandedCampaignId === camp.id ? "up" : "down"
+                          } text-muted`}
+                        ></i>
+                      </div>
 
-              {/* Load More Button Logic */}
+                      {expandedCampaignId === camp.id && (
+                        <div className="bg-white px-3 pb-3">
+                          {/* Sorting Dropdown */}
+                          <div className="dropdown mb-3">
+                            <small
+                              className="text-muted dropdown-toggle cursor-pointer font-weight-bold"
+                              data-bs-toggle="dropdown"
+                            >
+                              Sort by:{" "}
+                              {sortBy === "engagement"
+                                ? "Avg Engagement"
+                                : "Followers"}
+                            </small>
+                            <ul className="dropdown-menu shadow-sm border-0">
+                              <li>
+                                <button
+                                  className="dropdown-item small"
+                                  onClick={() => handleSortChange("engagement")}
+                                >
+                                  Avg Engagement
+                                </button>
+                              </li>
+                              <li>
+                                <button
+                                  className="dropdown-item small"
+                                  onClick={() => handleSortChange("followers")}
+                                >
+                                  Followers
+                                </button>
+                              </li>
+                            </ul>
+                          </div>
+
+                          {/* Influencer List under Campaign */}
+                          {proposalsMap[camp.id]?.list?.map((prop) => (
+                            <div
+                              key={prop.id}
+                              onClick={() =>
+                                setSelectedInfluencer(prop.igb_account)
+                              }
+                              className={`d-flex align-items-center justify-content-between py-2 cursor-pointer border-top ${
+                                selectedInfluencer?.id === prop.igb_account?.id
+                                  ? "bg-light rounded px-1"
+                                  : ""
+                              }`}
+                            >
+                              <div className="d-flex align-items-center">
+                                <div
+                                  className="me-3 rounded-circle overflow-hidden"
+                                  style={{ width: "40px", height: "40px" }}
+                                >
+                                  <img
+                                    src={prop.igb_account?.profile_picture_url}
+                                    className="w-100 h-100"
+                                    style={{ objectFit: "cover" }}
+                                    alt=""
+                                  />
+                                </div>
+                                <div>
+                                  <div
+                                    className="font-weight-bold lh-1"
+                                    style={{ fontSize: "14px" }}
+                                  >
+                                    {prop.igb_account?.name}
+                                  </div>
+                                  <small
+                                    className="text-muted"
+                                    style={{ fontSize: "12px" }}
+                                  >
+                                    @{prop.igb_account?.username}
+                                  </small>
+                                </div>
+                              </div>
+                              <i className="bi bi-chevron-right text-muted"></i>
+                            </div>
+                          ))}
+
+                          {proposalsMap[camp.id]?.hasMore && (
+                            <button
+                              onClick={() => fetchProposals(camp.id)}
+                              disabled={proposalsMap[camp.id]?.isLoading}
+                              className="btn btn-outline-light text-muted w-100 mt-2 py-2 border shadow-sm small font-weight-bold"
+                            >
+                              {proposalsMap[camp.id]?.isLoading
+                                ? "Loading..."
+                                : "Load More Influencers"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+              {/* Main List Load More */}
               {hasMore && (
                 <button
-                  onClick={() => fetchInfluencers(false)}
+                  onClick={() => fetchData(false)}
                   disabled={isLoading}
-                  className="btn btn-outline-secondary btn-block mt-4 rounded-lg py-2 text-muted font-weight-normal shadow-sm w-100"
-                  style={{ borderColor: "#ddd" }}
+                  className="btn btn-outline-secondary w-100 mt-4 py-2 text-muted shadow-sm border-light-grey"
                 >
-                  {isLoading ? (
-                    <span className="spinner-border spinner-border-sm me-2"></span>
-                  ) : (
-                    "Load More"
-                  )}
+                  {isLoading ? "Loading..." : `Load More`}
                 </button>
-              )}
-
-              {!hasMore && influencers.length > 0 && (
-                <p
-                  className="text-center text-muted mt-4"
-                  style={{ fontSize: "12px" }}
-                >
-                  No more influencers to show.
-                </p>
               )}
             </div>
           </div>
         </div>
 
-        {/* --- RIGHT SIDE: Profile Detail --- */}
+        {/* RIGHT COLUMN (Detail View) */}
         <div
-          className={`col-12 col-md-8 p-0 ${
+          className={`col-12 col-md-8 p-0 border-start ${
             !selectedInfluencer && isMobile ? "d-none" : "d-block"
           }`}
         >
           {selectedInfluencer ? (
             <div className="p-4 text-center">
-              <div className="d-md-none text-left mb-4">
+              <div className="d-md-none text-start mb-4">
                 <button
-                  className="btn btn-link text-dark p-0 text-decoration-none font-weight-bold"
-                  onClick={goBack}
+                  className="btn btn-link text-dark p-0 font-weight-bold text-decoration-none"
+                  onClick={() => setSelectedInfluencer(null)}
                 >
-                  <i className="bi bi-arrow-left mr-2"></i> Back to list
+                  <i className="bi bi-arrow-left me-2"></i> Back
                 </button>
               </div>
-
               <div
-                className="avatar-large mx-auto text-white rounded-circle d-flex align-items-center justify-content-center mb-3 mt-4 overflow-hidden"
-                style={{
-                  width: "90px",
-                  height: "90px",
-                  backgroundColor: selectedInfluencer.color || "#ccc",
-                  fontSize: "36px",
-                }}
+                className="avatar-large mx-auto rounded-circle overflow-hidden mb-3 mt-4 border shadow-sm"
+                style={{ width: "100px", height: "100px" }}
               >
-                {selectedInfluencer.profile_picture_url ? (
-                  <img
-                    src={selectedInfluencer.profile_picture_url}
-                    alt={selectedInfluencer.name}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                    }}
-                  />
-                ) : (
-                  selectedInfluencer.name?.charAt(0)
-                )}
+                <img
+                  src={selectedInfluencer.profile_picture_url}
+                  className="w-100 h-100"
+                  style={{ objectFit: "cover" }}
+                  alt=""
+                />
               </div>
-              <h3 className="font-weight-bold mb-1">
+              <h3 className="font-weight-bold mb-1 lh-1">
                 {selectedInfluencer.name}
               </h3>
               <p className="text-muted mb-5">@{selectedInfluencer.username}</p>
 
-              <hr className="w-100 mb-0" style={{ opacity: "0.1" }} />
-
-              {/* Stats Grid with Safety Guards */}
               <div
-                className="row no-gutters py-4 border-bottom"
-                style={{ borderColor: "#f8f8f8" }}
+                className="row no-gutters py-4 border-top border-bottom"
+                style={{ borderColor: "#f1f1f1" }}
               >
                 <div className="col-4 border-right">
                   <h4 className="font-weight-bold mb-1">
@@ -307,8 +493,8 @@ const InfluencersList = () => {
                     )}
                   </h4>
                   <small
-                    className="text-muted d-block font-weight-bold"
-                    style={{ fontSize: "10px", textTransform: "uppercase" }}
+                    className="text-muted text-uppercase font-weight-bold"
+                    style={{ fontSize: "10px" }}
                   >
                     Avg. likes
                   </small>
@@ -321,8 +507,8 @@ const InfluencersList = () => {
                     )}
                   </h4>
                   <small
-                    className="text-muted d-block font-weight-bold"
-                    style={{ fontSize: "10px", textTransform: "uppercase" }}
+                    className="text-muted text-uppercase font-weight-bold"
+                    style={{ fontSize: "10px" }}
                   >
                     Followers
                   </small>
@@ -336,44 +522,16 @@ const InfluencersList = () => {
                     %
                   </h4>
                   <small
-                    className="text-muted d-block font-weight-bold"
-                    style={{ fontSize: "10px", textTransform: "uppercase" }}
+                    className="text-muted text-uppercase font-weight-bold"
+                    style={{ fontSize: "10px" }}
                   >
                     Engagement
                   </small>
                 </div>
               </div>
-
-              <div className="py-4 d-flex justify-content-center">
-                <div className="custom-control custom-switch d-flex align-items-center">
-                  <input
-                    type="checkbox"
-                    className="custom-control-input"
-                    id="sponsoredSwitch"
-                    checked={showSponsored}
-                    onChange={() => setShowSponsored(!showSponsored)}
-                  />
-                  <label
-                    className="custom-control-label text-muted ms-2"
-                    htmlFor="sponsoredSwitch"
-                    style={{ fontSize: "14px", cursor: "pointer" }}
-                  >
-                    Show sponsored post
-                  </label>
-                </div>
-              </div>
-
-              <div className="mt-5 pt-5">
-                <p
-                  className="text-muted font-weight-light"
-                  style={{ fontSize: "14px", opacity: "0.6" }}
-                >
-                  This Influencer has no recent posts.
-                </p>
-              </div>
             </div>
           ) : (
-            <div className="h-100 d-none d-md-flex align-items-center justify-content-center text-muted">
+            <div className="h-100 d-flex align-items-center justify-content-center text-muted">
               <p>Select an influencer to see details</p>
             </div>
           )}

@@ -4,7 +4,7 @@ export default function CustomRadio({
   name,
   value,
   selectedValue,
-  onChange,
+  onChange = () => {},
   children,
 }) {
   // Generate a unique ID so labels link correctly to inputs
