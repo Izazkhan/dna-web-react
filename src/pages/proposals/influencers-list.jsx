@@ -5,18 +5,28 @@ import useAxios from "../../hooks/use-axios";
 const InfluencersList = () => {
   const axios = useAxios();
   const PAGE_SIZE = 1;
+  const POSTS_PAGE_SIZE = 9; // Show posts in rows of 3
 
+  // List States
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedInfluencer, setSelectedInfluencer] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [activeFilter, setActiveFilter] = useState("all");
   const [sortBy, setSortBy] = useState("engagement");
 
+  // Data States
   const [influencers, setInfluencers] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [expandedCampaignId, setExpandedCampaignId] = useState(null);
   const [proposalsMap, setProposalsMap] = useState({});
 
+  // Posts specific states
+  const [influencerPosts, setInfluencerPosts] = useState([]);
+  const [postsPage, setPostsPage] = useState(1);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
+  const [isPostsLoading, setIsPostsLoading] = useState(false);
+
+  // Pagination/Loading States
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -30,13 +40,14 @@ const InfluencersList = () => {
     declined: "rejected",
     active: "active",
   };
+
   const getApiStatus = (filter) => {
     if (filter === "worked-with") return "completed";
     if (filter === "review") return "accepted";
     return filter;
   };
 
-  // Main List
+  // FETCH MAIN LIST
   const fetchData = useCallback(
     async (isInitial = false, overrideSort = null) => {
       if (isLoading) return;
@@ -49,10 +60,8 @@ const InfluencersList = () => {
         const url = isAll
           ? "/influencers"
           : `/adcampaigns/with-${statusForUrl}-proposals`;
-
         const currentSort = overrideSort || sortBy;
-        console.log('Here 1', searchQuery);
-        
+
         const response = await axios({
           method: "GET",
           url: url,
@@ -79,12 +88,11 @@ const InfluencersList = () => {
             : setCampaigns((p) => [...p, ...items]);
           setPage((p) => p + 1);
         }
-
-        if (pagination) {
-          setHasMore(pagination.page < pagination.totalPages);
-        } else {
-          setHasMore(items.length >= PAGE_SIZE);
-        }
+        setHasMore(
+          pagination
+            ? pagination.page < pagination.totalPages
+            : items.length >= PAGE_SIZE
+        );
       } catch (error) {
         console.error("Main list fetch error:", error);
       } finally {
@@ -94,7 +102,7 @@ const InfluencersList = () => {
     [axios, page, activeFilter, isLoading, sortBy, searchQuery]
   );
 
-  // Nested Proposals
+  // FETCH NESTED PROPOSALS
   const fetchProposals = useCallback(
     async (campaignId, isInitial = false, overrideSort = null) => {
       setProposalsMap((prev) => ({
@@ -106,7 +114,6 @@ const InfluencersList = () => {
         const currentData = proposalsMap[campaignId];
         const nextPage = isInitial ? 1 : currentData?.page || 1;
         const statusForUrl = getApiStatus(activeFilter);
-
         const currentSort = overrideSort || sortBy;
 
         const response = await axios.get(
@@ -147,12 +154,72 @@ const InfluencersList = () => {
     [axios, activeFilter, sortBy, proposalsMap]
   );
 
+  // FETCH POSTS WITH PAGINATION
+  const fetchInfluencerPosts = useCallback(
+    async (isInitial = false) => {
+      if (!selectedInfluencer || isPostsLoading) return;
+
+      setIsPostsLoading(true);
+      const currentPage = isInitial ? 1 : postsPage;
+
+      try {
+        const response = await axios.get(
+          `/influencer/${selectedInfluencer.id}/posts`,
+          {
+            params: { page: currentPage, pagesize: POSTS_PAGE_SIZE },
+          }
+        );
+
+        const newPosts = response.data?.data?.posts || [];
+        const pagination = response.data?.data?.pagination;
+
+        if (isInitial) {
+          setInfluencerPosts(newPosts);
+          setPostsPage(2);
+        } else {
+          setInfluencerPosts((prev) => [...prev, ...newPosts]);
+          setPostsPage((prev) => prev + 1);
+        }
+
+        setHasMorePosts(
+          pagination
+            ? pagination.page < pagination.totalPages
+            : newPosts.length >= POSTS_PAGE_SIZE
+        );
+      } catch (error) {
+        console.error("Error fetching posts:", error);
+      } finally {
+        setIsPostsLoading(false);
+      }
+    },
+    [selectedInfluencer, postsPage, isPostsLoading, axios]
+  );
+
+  // Trigger initial posts fetch when influencer changes
+  useEffect(() => {
+    setInfluencerPosts([]);
+    setPostsPage(1);
+    setHasMorePosts(false);
+    if (selectedInfluencer) {
+      fetchInfluencerPosts(true);
+    }
+  }, [selectedInfluencer]);
+
+  // Debounced Search/Filter
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      setExpandedCampaignId(null);
+      setProposalsMap({});
+      fetchData(true);
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [activeFilter, searchQuery]);
+
   const handleSortChange = (newSort) => {
     setSortBy(newSort);
-
     if (activeFilter === "all") {
       setInfluencers([]);
-      fetchData(true, newSort); // Pass newSort explicitly
+      fetchData(true, newSort);
     } else if (expandedCampaignId) {
       setProposalsMap((prev) => ({
         ...prev,
@@ -164,28 +231,9 @@ const InfluencersList = () => {
           isLoading: true,
         },
       }));
-      fetchProposals(expandedCampaignId, true, newSort); // Pass newSort explicitly
+      fetchProposals(expandedCampaignId, true, newSort);
     }
   };
-
-  useEffect(() => {
-    // Create a debouncer to wait for the user to stop typing
-    
-    const delayDebounceFn = setTimeout(() => {
-      setExpandedCampaignId(null);
-      setProposalsMap({});
-      fetchData(true);
-    }, 500);
-      console.log('Here 0', searchQuery);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [activeFilter, searchQuery]);
-
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   const toggleCampaign = (campaignId) => {
     if (expandedCampaignId === campaignId) {
@@ -208,23 +256,30 @@ const InfluencersList = () => {
       { value: 1, symbol: "" },
       { value: 1e3, symbol: "k" },
       { value: 1e6, symbol: "m" },
-      { value: 1e9, symbol: "b" },
     ];
     const item = lookup
       .slice()
       .reverse()
       .find((i) => n >= i.value);
     return item
-      ? (n / item.value)
-          .toFixed(digits)
-          .replace(/\.0+$|(\.[0-9]*[1-9])0+$/, "$1") + item.symbol
+      ? n > 10000
+        ? (n / item.value)
+            .toFixed(digits)
+            .replace(/\.0+$|(\.[0-9]*[1-9])0+$/, "$1") + item.symbol
+        : n
       : "0";
   };
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   return (
     <div className="container-fluid bg-white">
       <div className="row m-lg-4 justify-content-center proposal-influencers-list-p">
-        {/* LEFT COLUMN */}
+        {/* LEFT COLUMN: LIST */}
         <div
           className={`col-12 col-md-4 border-right p-0 ${
             selectedInfluencer && isMobile ? "d-none" : "d-block"
@@ -235,7 +290,6 @@ const InfluencersList = () => {
               Influencers
             </h4>
 
-            {/* Filter Section */}
             <div className="d-flex align-items-center mb-4">
               <div
                 className="input-group bg-light rounded-pill px-3 py-2 align-items-center flex-grow-1"
@@ -280,53 +334,39 @@ const InfluencersList = () => {
               </div>
             </div>
 
-            {/* Main List */}
             <div className="influencer-list">
               {activeFilter === "all"
-                ? influencers
-                    .filter((inf) =>
-                      inf.name
-                        ?.toLowerCase()
-                        .includes(searchQuery.toLowerCase())
-                    )
-                    .map((inf) => (
-                      <div
-                        key={inf.id}
-                        onClick={() => setSelectedInfluencer(inf)}
-                        className={`d-flex align-items-center justify-content-between p-1 border-bottom cursor-pointer ${
-                          selectedInfluencer?.id === inf.id ? "bg-light" : ""
-                        }`}
-                      >
-                        <div className="d-flex align-items-center">
+                ? influencers.map((inf) => (
+                    <div
+                      key={inf.id}
+                      onClick={() => setSelectedInfluencer(inf)}
+                      className={`d-flex align-items-center justify-content-between p-2 border-bottom cursor-pointer ${
+                        selectedInfluencer?.id === inf.id ? "bg-light" : ""
+                      }`}
+                    >
+                      <div className="d-flex align-items-center">
+                        <img
+                          src={inf.profile_picture_url}
+                          className="me-3 rounded-circle"
+                          style={{
+                            width: "40px",
+                            height: "40px",
+                            objectFit: "cover",
+                          }}
+                        />
+                        <div className="lh-1">
                           <div
-                            className="me-3 rounded-circle overflow-hidden"
-                            style={{ width: "40px", height: "40px" }}
+                            className="font-weight-bold"
+                            style={{ fontSize: "14px" }}
                           >
-                            <img
-                              src={inf.profile_picture_url}
-                              alt=""
-                              style={{
-                                width: "100%",
-                                height: "100%",
-                                objectFit: "cover",
-                              }}
-                            />
+                            {inf.name}
                           </div>
-                          <div>
-                            <div
-                              className="font-weight-bold lh-1"
-                              style={{ fontSize: "14px" }}
-                            >
-                              {inf.name}
-                            </div>
-                            <small className="text-muted">
-                              @{inf.username}
-                            </small>
-                          </div>
+                          <small className="text-muted">@{inf.username}</small>
                         </div>
-                        <i className="bi bi-chevron-right text-muted"></i>
                       </div>
-                    ))
+                      <i className="bi bi-chevron-right text-muted"></i>
+                    </div>
+                  ))
                 : campaigns.map((camp) => (
                     <div key={camp.id} className="border-bottom">
                       <div
@@ -342,18 +382,16 @@ const InfluencersList = () => {
                           } text-muted`}
                         ></i>
                       </div>
-
                       {expandedCampaignId === camp.id && (
                         <div className="bg-white px-3 pb-3">
-                          {/* Sorting Dropdown */}
                           <div className="dropdown mb-3">
                             <small
                               className="text-muted dropdown-toggle cursor-pointer font-weight-bold"
                               data-bs-toggle="dropdown"
                             >
-                              Sort by:{" "}
+                              Sort:{" "}
                               {sortBy === "engagement"
-                                ? "Avg Engagement"
+                                ? "Engagement"
                                 : "Followers"}
                             </small>
                             <ul className="dropdown-menu shadow-sm border-0">
@@ -375,8 +413,6 @@ const InfluencersList = () => {
                               </li>
                             </ul>
                           </div>
-
-                          {/* Influencer List under Campaign */}
                           {proposalsMap[camp.id]?.list?.map((prop) => (
                             <div
                               key={prop.id}
@@ -390,20 +426,18 @@ const InfluencersList = () => {
                               }`}
                             >
                               <div className="d-flex align-items-center">
-                                <div
-                                  className="me-3 rounded-circle overflow-hidden"
-                                  style={{ width: "40px", height: "40px" }}
-                                >
-                                  <img
-                                    src={prop.igb_account?.profile_picture_url}
-                                    className="w-100 h-100"
-                                    style={{ objectFit: "cover" }}
-                                    alt=""
-                                  />
-                                </div>
-                                <div>
+                                <img
+                                  src={prop.igb_account?.profile_picture_url}
+                                  className="me-3 rounded-circle"
+                                  style={{
+                                    width: "40px",
+                                    height: "40px",
+                                    objectFit: "cover",
+                                  }}
+                                />
+                                <div className="lh-1">
                                   <div
-                                    className="font-weight-bold lh-1"
+                                    className="font-weight-bold"
                                     style={{ fontSize: "14px" }}
                                   >
                                     {prop.igb_account?.name}
@@ -419,115 +453,158 @@ const InfluencersList = () => {
                               <i className="bi bi-chevron-right text-muted"></i>
                             </div>
                           ))}
-
                           {proposalsMap[camp.id]?.hasMore && (
                             <button
                               onClick={() => fetchProposals(camp.id)}
                               disabled={proposalsMap[camp.id]?.isLoading}
-                              className="btn btn-outline-light text-muted w-100 mt-2 py-2 border shadow-sm small font-weight-bold"
+                              className="btn btn-outline-light text-muted w-100 mt-2 py-2 border shadow-sm small"
                             >
                               {proposalsMap[camp.id]?.isLoading
                                 ? "Loading..."
-                                : "Load More Influencers"}
+                                : "Load More"}
                             </button>
                           )}
                         </div>
                       )}
                     </div>
                   ))}
-
-              {/* Main List Load More */}
               {hasMore && (
                 <button
                   onClick={() => fetchData(false)}
                   disabled={isLoading}
                   className="btn btn-outline-secondary w-100 mt-4 py-2 text-muted shadow-sm border-light-grey"
                 >
-                  {isLoading ? "Loading..." : `Load More`}
+                  {isLoading ? "Loading..." : "Load More"}
                 </button>
               )}
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN (Detail View) */}
+        {/* RIGHT COLUMN: DETAIL VIEW */}
         <div
           className={`col-12 col-md-8 p-0 border-start ${
             !selectedInfluencer && isMobile ? "d-none" : "d-block"
           }`}
         >
           {selectedInfluencer ? (
-            <div className="p-4 text-center">
-              <div className="d-md-none text-start mb-4">
-                <button
-                  className="btn btn-link text-dark p-0 font-weight-bold text-decoration-none"
-                  onClick={() => setSelectedInfluencer(null)}
+            <div className="p-0">
+              <div className="p-4 text-center border-bottom">
+                <div className="d-md-none text-start mb-4">
+                  <button
+                    className="btn btn-link text-dark p-0 font-weight-bold text-decoration-none"
+                    onClick={() => setSelectedInfluencer(null)}
+                  >
+                    <i className="bi bi-arrow-left me-2"></i> Back
+                  </button>
+                </div>
+                <div
+                  className="mx-auto rounded-circle overflow-hidden mb-3 border shadow-sm"
+                  style={{ width: "100px", height: "100px" }}
                 >
-                  <i className="bi bi-arrow-left me-2"></i> Back
-                </button>
+                  <img
+                    src={selectedInfluencer.profile_picture_url}
+                    className="w-100 h-100"
+                    style={{ objectFit: "cover" }}
+                  />
+                </div>
+                <h3 className="font-weight-bold mb-1 lh-1">
+                  {selectedInfluencer.name}
+                </h3>
+                <p className="text-muted mb-4">
+                  @{selectedInfluencer.username}
+                </p>
+                <div className="row no-gutters py-3 border-top">
+                  <div className="col-4 border-right">
+                    <h4 className="font-weight-bold mb-0">
+                      {formatNumber(
+                        selectedInfluencer.profile_average_insights?.likes
+                      )}
+                    </h4>
+                    <small
+                      className="text-muted text-uppercase font-weight-bold"
+                      style={{ fontSize: "10px" }}
+                    >
+                      Avg. likes
+                    </small>
+                  </div>
+                  <div className="col-4 border-right">
+                    <h4 className="font-weight-bold mb-0">
+                      {formatNumber(
+                        selectedInfluencer.profile_average_insights
+                          ?.followers_count
+                      )}
+                    </h4>
+                    <small
+                      className="text-muted text-uppercase font-weight-bold"
+                      style={{ fontSize: "10px" }}
+                    >
+                      Followers
+                    </small>
+                  </div>
+                  <div className="col-4">
+                    <h4 className="font-weight-bold mb-0">
+                      {Number(
+                        selectedInfluencer?.profile_average_insights
+                          ?.engagement || 0
+                      ).toFixed(2)}
+                      %
+                    </h4>
+                    <small
+                      className="text-muted text-uppercase font-weight-bold"
+                      style={{ fontSize: "10px" }}
+                    >
+                      Engagement
+                    </small>
+                  </div>
+                </div>
               </div>
-              <div
-                className="avatar-large mx-auto rounded-circle overflow-hidden mb-3 mt-4 border shadow-sm"
-                style={{ width: "100px", height: "100px" }}
-              >
-                <img
-                  src={selectedInfluencer.profile_picture_url}
-                  className="w-100 h-100"
-                  style={{ objectFit: "cover" }}
-                  alt=""
-                />
-              </div>
-              <h3 className="font-weight-bold mb-1 lh-1">
-                {selectedInfluencer.name}
-              </h3>
-              <p className="text-muted mb-5">@{selectedInfluencer.username}</p>
 
-              <div
-                className="row no-gutters py-4 border-top border-bottom"
-                style={{ borderColor: "#f1f1f1" }}
-              >
-                <div className="col-4 border-right">
-                  <h4 className="font-weight-bold mb-1">
-                    {formatNumber(
-                      selectedInfluencer.profile_average_insights?.likes
-                    )}
-                  </h4>
-                  <small
-                    className="text-muted text-uppercase font-weight-bold"
-                    style={{ fontSize: "10px" }}
-                  >
-                    Avg. likes
-                  </small>
+              {/* POSTS GRID */}
+              <div className="p-3">
+                <h6 className="font-weight-bold mb-3">Recent Posts</h6>
+                <div className="row g-2">
+                  {influencerPosts.map((post) => (
+                    <div key={post.id} className="col-4">
+                      <div
+                        className="position-relative bg-light"
+                        style={{ paddingTop: "100%" }}
+                      >
+                        <img
+                          src={post.media_url || post.thumbnail_url}
+                          className="position-absolute top-0 start-0 w-100 h-100"
+                          style={{ objectFit: "cover" }}
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="col-4 border-right">
-                  <h4 className="font-weight-bold mb-1">
-                    {formatNumber(
-                      selectedInfluencer.profile_average_insights
-                        ?.followers_count
-                    )}
-                  </h4>
-                  <small
-                    className="text-muted text-uppercase font-weight-bold"
-                    style={{ fontSize: "10px" }}
-                  >
-                    Followers
-                  </small>
-                </div>
-                <div className="col-4">
-                  <h4 className="font-weight-bold mb-1">
-                    {Number(
-                      selectedInfluencer?.profile_average_insights
-                        ?.engagement || 0
-                    ).toFixed(2)}
-                    %
-                  </h4>
-                  <small
-                    className="text-muted text-uppercase font-weight-bold"
-                    style={{ fontSize: "10px" }}
-                  >
-                    Engagement
-                  </small>
-                </div>
+
+                {/* LOAD MORE POSTS BUTTON */}
+                {hasMorePosts && (
+                  <div className="text-center mt-4">
+                    <button
+                      onClick={() => fetchInfluencerPosts(false)}
+                      disabled={isPostsLoading}
+                      className="btn btn-sm btn-outline-secondary px-4 py-2 rounded-pill shadow-sm"
+                    >
+                      {isPostsLoading ? (
+                        <span
+                          className="spinner-border spinner-border-sm me-2"
+                          role="status"
+                          aria-hidden="true"
+                        ></span>
+                      ) : null}
+                      {isPostsLoading ? "Loading..." : "Load More Posts"}
+                    </button>
+                  </div>
+                )}
+
+                {!isPostsLoading && influencerPosts.length === 0 && (
+                  <div className="text-center py-5 text-muted small">
+                    No posts found.
+                  </div>
+                )}
               </div>
             </div>
           ) : (
