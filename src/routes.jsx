@@ -15,9 +15,9 @@ import CampaignDetail from "./pages/campaigns/campaign-detail";
 import { StripeApp } from "./pages/checkout/stripe-app";
 import PaymentSuccess from "./pages/checkout/payment-success";
 import EditCampaign from "./pages/campaigns/edit-campaign";
-import InfluencersList from "./pages/proposals/influencers-list"; // Added import
-import AgreementsList from "./pages/agreements/agreements-list"; // Added import
-import PaymentsList from "./pages/payments/payments-list"; // Added import
+import InfluencersList from "./pages/proposals/influencers-list";
+import AgreementsList from "./pages/agreements/agreements-list";
+import PaymentsList from "./pages/payments/payments-list";
 import Login from "./pages/auth/login";
 
 export function AppRoutes() {
@@ -36,8 +36,12 @@ export function AppRoutes() {
         <Route path="/" element={<MasterLayout />}>
           <Route path="/adcampaigns" element={<CampaignList />} />
           <Route path="/adcampaign/:id/checkout" element={<StripeApp />} />
-          <Route path="/adcampaign/payment-success" element={<PaymentSuccess />} />
+          <Route
+            path="/adcampaign/payment-success"
+            element={<PaymentSuccess />}
+          />
           <Route path="/adcampaigns/:id" element={<CampaignDetail />} />
+          
           <Route
             path="/adcampaigns/:id/edit"
             element={
@@ -45,7 +49,7 @@ export function AppRoutes() {
                 <EditCampaign />
               </AdCampaignProvider>
             }
-          /> {/* Added edit route */}
+          />
 
           <Route
             path="/adcampaign/create"

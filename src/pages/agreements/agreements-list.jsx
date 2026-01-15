@@ -67,7 +67,7 @@ export default function AgreementsList() {
               >
                 <li className="nav-item">
                   <button
-                    className={`nav-link px-4 py-2 fw-bold border-0 ${
+                    className={`nav-link px-4 py-2 border-0 ${
                       status === "active"
                         ? "active bg-white shadow-sm text-primary"
                         : "text-muted bg-transparent"
@@ -79,7 +79,7 @@ export default function AgreementsList() {
                 </li>
                 <li className="nav-item">
                   <button
-                    className={`nav-link px-4 py-2 fw-bold border-0 ${
+                    className={`nav-link px-4 py-2 border-0 ${
                       status === "completed"
                         ? "active bg-white shadow-sm text-primary"
                         : "text-muted bg-transparent"
@@ -125,7 +125,7 @@ export default function AgreementsList() {
             {enableLoadMoreBtn && (
               <div className="text-center mt-4 mb-5">
                 <button
-                  className="btn btn-secondary px-4 fw-bold rounded-pill"
+                  className="btn btn-secondary px-4 rounded-pill"
                   onClick={handleLoadMore}
                   disabled={loading}
                 >
@@ -146,7 +146,6 @@ export default function AgreementsList() {
   );
 }
 
-// CampaignAccordionItem remains the same as previous logic
 function CampaignAccordionItem({ campaign, status, axios }) {
   const [proposals, setProposals] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -204,7 +203,7 @@ function CampaignAccordionItem({ campaign, status, axios }) {
                 key={item.id}
                 className="card border-0 shadow-sm mb-3 rounded-4 p-4"
               >
-                <h6 className="fw-bold mb-1">
+                <h6 className="mb-1">
                   {item.igb_account?.name || "Partner"}
                 </h6>
                 <p className="text-secondary small mb-3">
@@ -212,7 +211,7 @@ function CampaignAccordionItem({ campaign, status, axios }) {
                   Client...
                 </p>
                 <button
-                  className="btn btn-link p-0 text-start fw-bold text-decoration-none"
+                  className="btn btn-link p-0 text-start text-decoration-none"
                   style={{ color: "#6f42c1" }}
                 >
                   Review

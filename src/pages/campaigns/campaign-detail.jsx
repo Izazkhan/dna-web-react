@@ -11,13 +11,20 @@ const CampaignDetail = () => {
   const { id: campaignId } = useParams();
 
   const [campaign, setCampaign] = useState({});
+  const [campaignInsights, setCampaignInsights] = useState({
+    matches: 0,
+    views: 0,
+    accepts: 0,
+    offers: 0,
+    published: 0,
+  });
 
   useEffect(() => {
     axios
       .get("/adcampaigns/" + campaignId)
       .then((response) => {
-        setCampaign(response.data.data);
-        console.log(response.data.data);
+        setCampaign(response.data?.data?.campaign);
+        setCampaignInsights(response.data?.data?.insights);
       })
       .catch((error) => {
         if (error.response && error.response.status === 404) {
@@ -29,32 +36,7 @@ const CampaignDetail = () => {
 
   const reach = { matches: 150, views: 200, accepts: 25, offers: 30 };
   const activity = { drafts_published: 10, drafts_completed: 5 };
-  const influencers = [
-    {
-      igb_account: {
-        username: "influencer1",
-        profile_picture_url: "https://example.com/pic1.jpg",
-      },
-      followers: 15000,
-    },
-    {
-      igb_account: {
-        username: "influencer2",
-        profile_picture_url: "https://example.com/pic2.jpg",
-      },
-      followers: 25000,
-    },
-  ];
-  const publishedDrafts = []; // Static empty
-  const publishedPosts = []; // Static empty
-  const submittedDrafts = []; // Static empty
   const user = { meta: { platform: "instagram" } };
-
-  const getFollowersCount = (influencer) =>
-    `${influencer.followers.toLocaleString()} followers`;
-
-  const getInfluencersAnalyticsUrl = (influencer) =>
-    `/influencer/${influencer.igb_account.username}/analytics`;
 
   if (campaign?.id === undefined) {
     return <Loader />;
@@ -117,7 +99,8 @@ const CampaignDetail = () => {
                       { month: "short", day: "numeric", year: "numeric" }
                     )}{" "}
                     {campaign.publish_until
-                      ? "- " + new Date(campaign.publish_until).toLocaleDateString(
+                      ? "- " +
+                        new Date(campaign.publish_until).toLocaleDateString(
                           "en-US",
                           { month: "short", day: "numeric", year: "numeric" }
                         )
@@ -255,39 +238,29 @@ const CampaignDetail = () => {
                 <div className="row mb-3">
                   <div className="col-6 d-flex align-items-center">
                     <h5 className="section-header m-0">
-                      Campaign Activity (Dummy)
+                      Campaign Activity
                     </h5>
-                  </div>
-                  <div className="col-6 d-flex align-items-center justify-content-start justify-content-sm-end">
-                    <Link
-                      to={`/adcampaign/insights/${campaign.id}`}
-                      className="btn btn-sm btn-secondary fw-bold"
-                    >
-                      View Campaign Analytics
-                    </Link>
                   </div>
                 </div>
                 <div className="activity-container">
                   <div className="matched-inf">
-                    <div className="title">{reach.matches}</div>
+                    <div className="title">{campaignInsights.matches}</div>
                     <div className="no">Matched Influencers</div>
                   </div>
                   <div className="no-of-views">
-                    <div className="title">{reach.views}</div>
+                    <div className="title">{campaignInsights.views}</div>
                     <div className="no">Number of Views</div>
                   </div>
-                  <div className="accepted-offers">
-                    <div className="title">{reach.accepts}</div>
-                    <div className="no">Accepted Offers</div>
-                  </div>
                   <div className="active-offers">
-                    <div className="title">{reach.offers}</div>
+                    <div className="title">{campaignInsights.offers}</div>
                     <div className="no">Active Offers</div>
                   </div>
+                  <div className="accepted-offers">
+                    <div className="title">{campaignInsights.accepts}</div>
+                    <div className="no">Accepted Offers</div>
+                  </div>
                   <div className="published-offers">
-                    <div className="title">
-                      {activity.drafts_published + activity.drafts_completed}
-                    </div>
+                    <div className="title">{campaignInsights.published}</div>
                     <div className="no">Published Offers</div>
                   </div>
                 </div>
